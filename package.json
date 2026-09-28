@@ -1,0 +1,10 @@
+{
+  "name": "paperclip-adapter-zeroclaw-acp",
+  "version": "0.1.4",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "exports": { ".": "./index.js", "./server": "./index.js" },
+  "engines": { "node": ">=22" },
+  "scripts": { "test": "node --test" }
+}
