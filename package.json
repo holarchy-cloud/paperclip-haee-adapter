@@ -1,10 +1,27 @@
 {
-  "name": "paperclip-adapter-zeroclaw-acp",
+  "name": "paperclip-haee-adapter",
   "version": "0.1.7",
   "private": true,
+  "description": "Paperclip external adapter for HAEE (ZeroClaw-derived) ACP sessions",
+  "license": "MIT",
   "type": "module",
   "main": "./index.js",
-  "exports": { ".": "./index.js", "./server": "./index.js" },
-  "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test" }
+  "exports": {
+    ".": "./index.js",
+    "./server": "./index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/holarchy-cloud/paperclip-haee-adapter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/holarchy-cloud/paperclip-haee-adapter/issues"
+  },
+  "homepage": "https://github.com/holarchy-cloud/paperclip-haee-adapter#readme"
 }
