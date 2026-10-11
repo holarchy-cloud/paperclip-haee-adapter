@@ -8,8 +8,99 @@ A Paperclip external adapter for persistent ZeroClaw agents exposed at `/acp` ov
 2. Put the gateway token in the Paperclip server environment as `ZEROCLAW_ACP_TOKEN`. The adapter sends it through ZeroClaw's documented `?token=` authentication, so keep reverse proxy query logging disabled and use TLS remotely.
 3. Register this package through Paperclip's Adapter Manager or `POST /api/adapters/install` with JSON `{"packageName":"/absolute/path/to/paperclip-zeroclaw-adapter","isLocalPath":true}`. Select adapter type `zeroclaw_acp` for an agent.
 4. Configure `url` and `agentAlias`. In WSL NAT mode, enable `allowPlainPrivateWs`. Optionally set `cwd` to an existing workspace path **on the ZeroClaw host**.
-5. Set `paperclipApiUrl` to the Paperclip URL reachable from the ZeroClaw host (for Windows with WSL localhost forwarding, `http://127.0.0.1:3100`). Configure ZeroClaw `[http_request]` with this host in `allowed_domains` and `allowed_private_hosts`; set `[http_request.secrets] paperclip = "${PAPERCLIP_AGENT_AUTH}"`, where the gateway process environment variable contains `Bearer <dedicated Paperclip agent API key>`. Allow `http_request` on the agent's risk profile. The adapter supplies the URL, named secret, and current run ID as instructions without transmitting the API key or Paperclip's scoped run token.
+5. Configure Paperclip's Tool Gateway and grant the required tools to the agent. Paperclip supplies the invocation-scoped HTTP MCP endpoint and token to the adapter at runtime; no Paperclip API key is placed in the ZeroClaw prompt or saved in ZeroClaw session metadata.
 
-The adapter initializes ACP, resumes the prior session when present, or creates a new one, sends each Paperclip wake context as a prompt, streams text/tool status into Paperclip's run log, closes the active session while preserving its history, returns the persistent session ID, and sends ZeroClaw's `session/cancel` notification on operator cancellation. It declines `session/request_permission` requests; no human approval bridge is implemented. ZeroClaw usage/costs are not reported by this ACP surface. A failed resume fails the run rather than silently starting a fresh session and repeating work.
+The adapter initializes ACP, resumes the prior session when present, or creates a new one. It sends Paperclip's current brokered HTTP MCP servers and credentials on each session request, sends the wake context as a prompt, streams text/tool status into Paperclip's run log, and closes the active session while preserving its history. It sends ZeroClaw's `session/cancel` notification on operator cancellation and declines `session/request_permission` requests; no human approval bridge is implemented. ZeroClaw usage/costs are not reported by this ACP surface. A failed resume fails the run rather than silently starting a fresh session and repeating work.
 
 Run `npm test` to exercise new and resumed sessions against a mock ACP socket.
+
+## Invocation-scoped task tools
+
+Set `taskMcpBindHost` (or server environment `ZEROCLAW_TASK_MCP_BIND_HOST`)
+to the Paperclip LXC's Tailscale IPv4 address. The adapter starts an ephemeral
+HTTP MCP listener on that address for each task-bound run. ZeroClaw must reach
+the selected port over Tailscale; HTTP is protected by Tailscale's encrypted
+transport and a fresh per-invocation bearer. Public/wildcard bind addresses are
+rejected. `127.0.0.1` is supported for same-host execution and tests only.
+
+The adapter privately relays narrow task tools to the existing Paperclip API
+using `ctx.authToken` and `X-Paperclip-Run-Id`, following the local adapters'
+authentication and callback-bridge patterns. It declares `supportsLocalAgentJwt`
+so Paperclip supplies a current-run JWT, and `runtimeToolDelivery: native_mcp`
+so connection-intent tools are delivered as actual MCP tools rather than
+credential-bearing wake-context data. `taskApiUrl` can override the
+local API origin; otherwise the Paperclip listen host/port are used. It is not
+a generic HTTP proxy and does not mint agent credentials or bypass API policy.
+The listener and in-flight requests are revoked on cancellation and closed
+before `execute()` returns. Resumed sessions receive a fresh endpoint/token.
+
+ACP server identifiers are `paperclip_tasks` for the task bridge and
+`paperclip_broker_1`, `paperclip_broker_2`, etc. for supplied servers in their
+current order. They are transport-local identifiers, not Paperclip display
+names or connection identities; URLs, credentials, and grants are unchanged.
+ZeroClaw prefixes each tool with `<server>__`, and OpenRouter omits names that
+do not match `^[a-zA-Z0-9_-]{1,64}$`. Forwarding display names containing spaces
+therefore registered tools in ZeroClaw but removed them from native model
+requests. Short, distinct identifiers avoid that prefix failure and collisions
+between repeated display names. Remote tool names must still satisfy the
+provider's character and total-length constraints.
+
+Wake instructions require the exact advertised names and argument schemas,
+including the MCP prefix. Lifecycle operation names in the instructions are
+not unprefixed callable names. Printed JavaScript or JSON is not a tool call.
+
+The task bridge fills gaps in the supplied agent-run MCP tools; it does not
+duplicate `set_task_title` or `create_task`. Those remain on Paperclip's supplied
+project-tools server. Paperclip's public OAuth MCP finish operation acts as the
+connected person, not the invoked agent, and is not a replacement for the
+authenticated current-run bridge.
+
+Paperclip's supplied project-tools server makes downstream requests using its
+runtime `PAPERCLIP_API_URL`. This must be reachable from the Paperclip server
+itself as well as from ZeroClaw. When Paperclip binds only to Tailscale, neither
+loopback nor a short hostname resolving to another interface is sufficient.
+Set an explicit reachable origin (for example the full MagicDNS hostname with
+the listening port) in Paperclip's service environment. This does not change
+the public authentication base URL or weaken tool authorization.
+
+Tools cover current-task reads, bounded history, checkout,
+durable progress/results, completion, dependency/agent-owned blockers, and
+human questions/confirmations with saved waiting paths. The server's actual
+status is returned: a completion request can remain `in_review` under review
+gates. Ask/Plan modes cannot complete/block/check out work; conversation tasks
+do not receive execution disposition tools. No automatic completion is inferred
+from model prose. A failed or ambiguous write is reported explicitly and is
+not repeated with the same invocation idempotency key; inspect current state
+before deciding on further action. Receipts are invocation-local, not durable
+cross-run deduplication.
+
+### Missing task/run authentication
+
+For a task-bound invocation with the task listener enabled, the adapter requires
+`ctx.authToken`, `ctx.runId`, `ctx.agent.id`, and `ctx.agent.companyId`.
+Missing fields are named in the failure before connecting to ZeroClaw.
+The adapter does not mint a Paperclip JWT or recover one from task text,
+saved session state, adapter config, or the ACP gateway token.
+
+If `ctx.authToken` is missing, verify that Paperclip loaded the current adapter
+factory with `supportsLocalAgentJwt: true`. Paperclip's legacy adapter execution
+path mints the JWT using its server-side `PAPERCLIP_AGENT_JWT_SECRET`, falling
+back to `BETTER_AUTH_SECRET`. Without a signing secret it can invoke the adapter
+without a JWT; this adapter rejects that task-bound invocation. Check secret
+presence locally without displaying its value. Changing files on disk alone
+does not establish which module the running Paperclip process has loaded.
+The capability declaration is already present; do not substitute a static
+agent key or forward Paperclip's signing secret to ZeroClaw.
+
+Without a bind address the adapter continues to forward only supplied MCP
+servers, preserving empty-catalog isolation tests. Tool availability is checked
+against current task ownership on every call. Wake prompts omit transport
+metadata and redact current credentials.
+
+## ZeroClaw Compatibility
+
+This integration requires a ZeroClaw build containing the `paperclipToolsOnly` ACP session extension. Stock ZeroClaw v0.8.5 does not consume the per-session `mcpServers` request field or enforce the brokered-only tool allowlist. Do not deploy the updated adapter against an unmodified runtime: the adapter and ZeroClaw change must be rolled out together.
+
+For a Paperclip-scoped ACP session, ZeroClaw connects only the supplied HTTP MCP servers and exposes only tools advertised by those servers. Built-in tools and saved agent MCP bundles are excluded from that session. A missing/empty brokered catalog therefore gives the model no tools; it does not fall back to generic HTTP, shell, or globally configured MCP. Standalone ZeroClaw sessions keep their existing tool configuration.
+
+The session request carries the current Paperclip MCP bearer token in the HTTP transport header. The token is not included in the prompt or persisted session parameters. Verify this property and the server-side Tool Gateway policy/audit for each deployment. The adapter's environment check validates ACP connectivity only; it does not validate Tool Gateway access or issue completion.

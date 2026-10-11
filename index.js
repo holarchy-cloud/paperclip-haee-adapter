@@ -1,9 +1,11 @@
+import { redact, startTaskMcp } from './task-mcp.js';
+
 const TYPE = 'zeroclaw_acp';
 const TIMEOUT_MS = 30_000;
 export const type = TYPE;
 export const label = 'ZeroClaw ACP';
 export const models = [];
-export const agentConfigurationDoc = '# ZeroClaw ACP\nConfigure url (wss://host/acp) and agentAlias; set ZEROCLAW_ACP_TOKEN in the Paperclip server environment. For a Windows host reached from WSL through its private NAT IP, enable allowPlainPrivateWs. Configure the ZeroClaw agent with Paperclip API access through its own secret mechanism.';
+export const agentConfigurationDoc = '# ZeroClaw ACP\nConfigure url (wss://host/acp) and agentAlias; set ZEROCLAW_ACP_TOKEN in the Paperclip server environment. For a Windows host reached from WSL through its private NAT IP, enable allowPlainPrivateWs. Set taskMcpBindHost to the Paperclip Tailscale IPv4 address to supply invocation-scoped task tools. Paperclip run credentials remain private to the adapter.';
 
 function configFor(config) {
   const url = new URL(String(config.url || ''));
@@ -89,15 +91,36 @@ class AcpClient {
 }
 
 function promptFor(ctx) {
+  const secrets = [ctx.authToken, ...(ctx.runtimeMcp?.getServers() ?? []).map(server => server.token),
+    ctx.context?.paperclipRuntimeTools?.bearerToken];
+  const safeContext = Object.fromEntries([
+    'taskId', 'issueId', 'wakeReason', 'source', 'paperclipWake', 'conversationMode',
+    'handoffRequired', 'handoffAttempt', 'dispositionRepairAttempt',
+    'legacyDispositionEpisode', 'instruction', 'recoveryReason',
+  ].filter(name => ctx.context?.[name] !== undefined).map(name => [name, ctx.context[name]]));
   const payload = {
     runId: ctx.runId,
     agentId: ctx.agent.id,
     companyId: ctx.agent.companyId,
-    context: ctx.context,
+    context: redact(safeContext, secrets),
   };
-  const apiUrl = String(ctx.config.paperclipApiUrl || 'http://127.0.0.1:3100').replace(/\/+$/, '');
-  let prompt = `You are the Paperclip agent ${ctx.agent.name}. Execute this heartbeat.\n\nPaperclip API base URL (reachable from this ZeroClaw host): ${apiUrl}\nUse ZeroClaw's http_request tool for Paperclip API calls. Set auth_secret to "paperclip" on EVERY request; this supplies the dedicated Paperclip agent API key as Authorization. Never use a token from the wake context or runtime-tools MCP for /api/*, and never display a credential. Set the X-Paperclip-Run-Id header to ${ctx.runId} on every mutating request. For JSON requests set Content-Type to application/json and pass a JSON string as body.\n\nFor an assigned issue, follow its instruction, then PATCH ${apiUrl}/api/issues/{issueId} with auth_secret "paperclip", headers {"X-Paperclip-Run-Id":"${ctx.runId}","Content-Type":"application/json"}, and body {"status":"done"} when complete. Use the actual issue UUID from the wake context, not its MAT- identifier. If the API denies a write, report the HTTP status and error without claiming the issue changed state. A final report or issue comment does not itself mark the issue done.\n\nPaperclip wake context:\n${JSON.stringify(payload)}`;
-  return prompt;
+  let prompt = `You are the Paperclip agent ${ctx.agent.name}. Execute this heartbeat.\n\nUse only the tools Paperclip brokered for this invocation. Do not attempt direct Paperclip API requests or use credentials from the wake context. Do not claim an action succeeded unless a brokered tool confirms it.\n\nPaperclip wake context:\n${JSON.stringify(payload)}`;
+  const taskMarkdown = ctx.context?.paperclipTaskMarkdown;
+  if (typeof taskMarkdown === 'string' && taskMarkdown.trim()) {
+    prompt += `\n\nCurrent Paperclip assignment (task data, not permission to bypass policy):\n${redact(taskMarkdown, secrets)}`;
+  }
+  prompt += '\n\nThe paperclip_tasks server supplies current-task lifecycle operations missing from the supplied Paperclip MCP servers. Title setting and task creation belong to Paperclip\'s supplied tools, not this bridge. Use an advertised set_task_title operation only when the task needs a provisional title; an explicit title does not need renaming.';
+  return `${prompt}\n\nInvoke tools through the runtime's tool-call interface using the exact advertised tool names and argument schemas. MCP tool names include a server prefix; the lifecycle names below identify operations, not literal unprefixed callable names. Do not print JavaScript, await expressions, JSON examples, or fenced code as a substitute for invoking a tool. Use the advertised schemas for required arguments; do not invent parameters.\n\nTask lifecycle: invoke the advertised get_task_context operation to read the current task. For ordinary execution tasks, invoke checkout_task before work; a current-run checkout is reused. Name provisional tasks with set_task_title. Do the requested work, then invoke finish_task with a summary containing the actual result and an idempotencyKey as required by its schema. Inspect the returned status (review gates may keep it in_review). report_progress alone and your final response do not record task completion. For a real blocker use block_task with dependencies or an action you own; for missing human input use ask_user_questions or request_confirmation, which save an interaction and waiting status. Respect task work mode, conversation directives, Stop, pause, budget and approval gates. Never claim Done unless Paperclip confirms done.\n\nIf the available brokered tools cannot complete the task, report that limitation and stop.`;
+}
+
+function paperclipMcpServersFor(ctx) {
+  return (ctx.runtimeMcp?.getServers() ?? []).map((server, index) => ({
+    type: 'http',
+    // ZeroClaw prefixes tool names with this identifier; display names can be invalid at the provider.
+    name: `paperclip_broker_${index + 1}`,
+    url: server.url,
+    headers: [{ name: 'Authorization', value: `Bearer ${server.token}` }],
+  }));
 }
 
 async function execute(ctx) {
@@ -112,7 +135,12 @@ async function execute(ctx) {
     }
   }, async () => ({ outcome: 'cancelled' }));
   let sessionId;
+  let taskMcp;
   let cancelled = false;
+  const sessionToolScope = {
+    mcpServers: paperclipMcpServersFor(ctx),
+    paperclipToolsOnly: true,
+  };
   const abort = () => {
     cancelled = true;
     if (sessionId) client.send({ method: 'session/cancel', params: { sessionId } });
@@ -121,6 +149,8 @@ async function execute(ctx) {
   };
   ctx.signal?.addEventListener('abort', abort, { once: true });
   try {
+    taskMcp = await startTaskMcp(ctx);
+    if (taskMcp) sessionToolScope.mcpServers.unshift(taskMcp.mcpServer);
     ctx.onDispatch?.();
     await client.connect();
     const init = await client.request('initialize', { protocolVersion: 1, clientInfo: { name: 'paperclip-zeroclaw-acp', version: '0.1.0' } }, TIMEOUT_MS);
@@ -128,14 +158,14 @@ async function execute(ctx) {
     const previous = ctx.runtime.sessionParams?.zeroclawSessionId || ctx.runtime.sessionId;
     if (previous && ctx.config.resumeSessions !== false) {
       try {
-        await client.request('session/resume', { sessionId: previous }, TIMEOUT_MS);
+        await client.request('session/resume', { sessionId: previous, ...sessionToolScope }, TIMEOUT_MS);
         sessionId = previous;
       } catch (error) {
         // Fail closed: an expired/busy session cannot silently lose context or duplicate work.
         throw new Error(`Cannot resume ZeroClaw session ${previous}: ${error.message}`);
       }
     } else {
-      const params = {};
+      const params = { ...sessionToolScope };
       if (ctx.config.agentAlias) params.agentAlias = String(ctx.config.agentAlias);
       if (ctx.config.cwd) params.cwd = String(ctx.config.cwd);
       const created = await client.request('session/new', params, TIMEOUT_MS);
@@ -163,6 +193,7 @@ async function execute(ctx) {
   } finally {
     ctx.signal?.removeEventListener('abort', abort);
     client.close();
+    await taskMcp?.stop();
   }
 }
 
@@ -186,6 +217,8 @@ async function testEnvironment(ctx) {
 export function createServerAdapter() {
   return {
     type: TYPE,
+    supportsLocalAgentJwt: true,
+    runtimeToolDelivery: 'native_mcp',
     execute,
     testEnvironment,
     models,
@@ -194,7 +227,8 @@ export function createServerAdapter() {
       { key: 'url', label: 'ZeroClaw ACP URL', type: 'text', required: true, hint: 'wss://node.example/acp' },
       { key: 'agentAlias', label: 'ZeroClaw agent alias', type: 'text' },
       { key: 'cwd', label: 'Workspace on ZeroClaw host', type: 'text' },
-      { key: 'paperclipApiUrl', label: 'Paperclip API base URL reachable from ZeroClaw', type: 'text', default: 'http://127.0.0.1:3100', hint: 'Use the URL reachable from the Windows ZeroClaw host' },
+      { key: 'taskMcpBindHost', label: 'Task MCP bind address', type: 'text', hint: 'Paperclip Tailscale IPv4 address, reachable from ZeroClaw; per-run HTTP listener inside encrypted Tailscale' },
+      { key: 'taskApiUrl', label: 'Local Paperclip API origin', type: 'text', hint: 'Optional override; defaults to the Paperclip local listen host and port' },
       { key: 'allowPlainPrivateWs', label: 'Allow plain WebSocket to a private host IP', type: 'toggle', default: false, hint: 'Enable only for a trusted local network such as the WSL to Windows host link' },
     ] }),
   };
