@@ -1,0 +1,64 @@
+{
+  "envelopeVersion": 1,
+  "identity": {
+    "runId": "run_lab_full_001",
+    "agentId": "agent_lab_elel",
+    "companyId": "company_lab_elel",
+    "haeeAgentAlias": "elel_lab"
+  },
+  "task": {
+    "issueId": "AGE-42",
+    "wakeReason": "assignment",
+    "summary": "Full v1 envelope with skill refs, dual MCP, and resume session id.",
+    "acceptanceHints": "Comment on the issue with the tool result; finish_task when done."
+  },
+  "auth": {
+    "paperclipApiBaseUrl": "http://paperclip.wombat-everest.ts.net:3100",
+    "runBearerToken": "RUN_TOKEN_PLACEHOLDER",
+    "runIdHeader": "X-Paperclip-Run-Id"
+  },
+  "skills": [
+    {
+      "key": "paperclipai/paperclip/issue-triage",
+      "runtimeName": "issue-triage",
+      "versionId": "sv_example_001",
+      "uri": "http://100.115.49.38:36181/skill-packs/issue-triage-sv_example_001.tar",
+      "integrity": {
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "sizeMax": 65536
+      },
+      "mediaType": "application/vnd.paperclip.skill.v1+tar",
+      "scope": "session",
+      "always": false
+    }
+  ],
+  "tools": {
+    "paperclipToolsOnly": true,
+    "mcpServers": [
+      {
+        "type": "http",
+        "name": "paperclip_tasks",
+        "url": "http://100.115.49.38:36180/mcp",
+        "headers": {
+          "Authorization": "Bearer TASK_MCP_TOKEN_PLACEHOLDER"
+        }
+      },
+      {
+        "type": "http",
+        "name": "paperclip_broker_1",
+        "url": "http://paperclip.wombat-everest.ts.net:3100/api/mcp/s_example",
+        "headers": {
+          "Authorization": "Bearer RUN_TOKEN_PLACEHOLDER"
+        },
+        "connectionId": "conn_example"
+      }
+    ]
+  },
+  "policy": {
+    "riskProfile": "elel_lab_permissive"
+  },
+  "session": {
+    "resumeSessionId": "sess_prior_example",
+    "cwd": "/home/warden/zeroclaw-lab/agents/elel_lab/workspace"
+  }
+}

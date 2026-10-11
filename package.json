@@ -1,6 +1,6 @@
 {
   "name": "paperclip-haee-adapter",
-  "version": "0.1.7",
+  "version": "0.1.9",
   "private": true,
   "description": "Paperclip external adapter for HAEE (ZeroClaw-derived) ACP sessions",
   "license": "MIT",

@@ -1,0 +1,24 @@
+{
+  "envelopeVersion": 99,
+  "identity": {
+    "runId": "run_bad_version",
+    "agentId": "agent_lab_elel",
+    "companyId": "company_lab_elel",
+    "haeeAgentAlias": "elel_lab"
+  },
+  "task": {
+    "summary": "Unsupported envelope version."
+  },
+  "auth": {
+    "paperclipApiBaseUrl": "http://paperclip.wombat-everest.ts.net:3100",
+    "runBearerToken": "RUN_TOKEN_PLACEHOLDER",
+    "runIdHeader": "X-Paperclip-Run-Id"
+  },
+  "skills": [],
+  "tools": {
+    "paperclipToolsOnly": true,
+    "mcpServers": []
+  },
+  "policy": {},
+  "session": {}
+}

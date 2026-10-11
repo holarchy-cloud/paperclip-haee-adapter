@@ -1,0 +1,48 @@
+{
+  "envelopeVersion": 1,
+  "identity": {
+    "runId": "run_lab_minimal_001",
+    "agentId": "agent_lab_elel",
+    "companyId": "company_lab_elel",
+    "haeeAgentAlias": "elel_lab"
+  },
+  "task": {
+    "issueId": "AGE-0",
+    "wakeReason": "manual",
+    "summary": "Minimal tools-only lab envelope (no skill refs)."
+  },
+  "auth": {
+    "paperclipApiBaseUrl": "http://paperclip.wombat-everest.ts.net:3100",
+    "runBearerToken": "RUN_TOKEN_PLACEHOLDER",
+    "runIdHeader": "X-Paperclip-Run-Id"
+  },
+  "skills": [],
+  "tools": {
+    "paperclipToolsOnly": true,
+    "mcpServers": [
+      {
+        "type": "http",
+        "name": "paperclip_tasks",
+        "url": "http://100.115.49.38:36180/mcp",
+        "headers": {
+          "Authorization": "Bearer TASK_MCP_TOKEN_PLACEHOLDER"
+        }
+      },
+      {
+        "type": "http",
+        "name": "paperclip_broker_1",
+        "url": "http://paperclip.wombat-everest.ts.net:3100/api/mcp/s_example",
+        "headers": {
+          "Authorization": "Bearer RUN_TOKEN_PLACEHOLDER"
+        },
+        "connectionId": "conn_example"
+      }
+    ]
+  },
+  "policy": {
+    "riskProfile": "elel_lab_permissive"
+  },
+  "session": {
+    "cwd": "/home/warden/zeroclaw-lab/agents/elel_lab/workspace"
+  }
+}

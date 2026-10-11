@@ -1,0 +1,32 @@
+{
+  "envelopeVersion": 1,
+  "identity": {
+    "runId": "run_skill_no_integrity",
+    "agentId": "agent_lab_elel",
+    "companyId": "company_lab_elel",
+    "haeeAgentAlias": "elel_lab"
+  },
+  "task": {
+    "summary": "Remote skill refs require integrity."
+  },
+  "auth": {
+    "paperclipApiBaseUrl": "http://paperclip.wombat-everest.ts.net:3100",
+    "runBearerToken": "RUN_TOKEN_PLACEHOLDER",
+    "runIdHeader": "X-Paperclip-Run-Id"
+  },
+  "skills": [
+    {
+      "key": "paperclipai/paperclip/issue-triage",
+      "runtimeName": "issue-triage",
+      "uri": "http://100.115.49.38:36181/skill-packs/issue-triage.tar",
+      "mediaType": "application/vnd.paperclip.skill.v1+tar",
+      "scope": "session"
+    }
+  ],
+  "tools": {
+    "paperclipToolsOnly": true,
+    "mcpServers": []
+  },
+  "policy": {},
+  "session": {}
+}

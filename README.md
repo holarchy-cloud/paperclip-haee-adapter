@@ -10,9 +10,10 @@ HAEE is a ZeroClaw-derived runtime ([holarchy-cloud/haee](https://github.com/hol
 
 | Item | Value |
 | --- | --- |
-| Package | `paperclip-haee-adapter` |
+| Package | `paperclip-haee-adapter` **@0.1.9** (envelope emit + skill packs; pair with HAEE Iter 0–9 tip) |
 | Paperclip adapter type id | `zeroclaw_acp` (kept for lab continuity; rename later) |
-| Runtime target | HAEE with `paperclipToolsOnly` + invocation `mcpServers` |
+| Runtime target | HAEE with nested run `envelope` (`tools.paperclipToolsOnly` + `tools.mcpServers` + `skills[]`) |
+| Lab gate | Isolation hire still open until HAEE binary + this adapter are pair-deployed (ElEl #6) |
 | License | MIT (same SPDX family as Paperclip AI) |
 
 ## Install
@@ -23,7 +24,7 @@ HAEE is a ZeroClaw-derived runtime ([holarchy-cloud/haee](https://github.com/hol
 4. Configure `url` and `agentAlias`. In WSL NAT mode, enable `allowPlainPrivateWs`. Optionally set `cwd` to an existing workspace path **on the HAEE host**.
 5. Configure Paperclip’s Tool Gateway and grant the required tools to the agent. Paperclip supplies the invocation-scoped HTTP MCP endpoint and token to the adapter at runtime; no Paperclip API key is placed in the HAEE prompt or saved in session metadata.
 
-The adapter initializes ACP, resumes the prior session when present, or creates a new one. It sends Paperclip’s current brokered HTTP MCP servers and credentials on each session request (including `paperclipToolsOnly` when supported), sends the wake context as a prompt, streams text/tool status into Paperclip’s run log, and closes the active session while preserving its history. It sends `session/cancel` on operator cancellation and declines `session/request_permission` requests; no human approval bridge is implemented. Runtime usage/costs are not reported by this ACP surface. A failed resume fails the run rather than silently starting a fresh session and repeating work.
+The adapter initializes ACP, resumes the prior session when present, or creates a new one. It sends a nested run `envelope` on each session request (identity, auth, tools, policy, session) as the sole tools/auth authority—no discarded top-level `paperclipToolsOnly` / `mcpServers` dual-write. It sends the wake context as a prompt, streams text/tool status into Paperclip’s run log, and closes the active session while preserving its history. It sends `session/cancel` on operator cancellation and declines `session/request_permission` requests; no human approval bridge is implemented. Runtime usage/costs are not reported by this ACP surface. A failed resume fails the run rather than silently starting a fresh session and repeating work.
 
 ```bash
 npm test
@@ -39,6 +40,13 @@ HTTP MCP listener on that address for each task-bound run. HAEE must reach
 the selected port over Tailscale; HTTP is protected by Tailscale’s encrypted
 transport and a fresh per-invocation bearer. Public/wildcard bind addresses are
 rejected. `127.0.0.1` is supported for same-host execution and tests only.
+
+When Paperclip materializes `config.paperclipRuntimeSkills` (key, runtimeName,
+source directory), the same bind host also publishes short-lived skill pack
+tarballs. Each pack is hashed (sha256 + sizeMax), listed in envelope `skills[]`
+with a private `http://` URL, and revoked when the run ends. Fetch authorization
+is a single-use path token (not logged in the wake prompt). Without a bind host,
+skill packs are omitted rather than emitting `file://` paths HAEE cannot read.
 
 The adapter privately relays narrow task tools to the existing Paperclip API
 using `ctx.authToken` and `X-Paperclip-Run-Id`, following the local adapters’
@@ -113,24 +121,25 @@ metadata and redact current credentials.
 
 ## HAEE compatibility
 
-This integration requires an HAEE build containing the `paperclipToolsOnly` ACP
-session extension. Stock upstream ZeroClaw does not consume the per-session
-`mcpServers` request field or enforce the brokered-only tool allowlist. Do not
-deploy this adapter against an unmodified stock runtime: adapter and HAEE must
-be rolled out together.
+This integration requires an HAEE build that accepts nested run `envelope` on
+ACP `session/new` | `session/resume` (Iteration 4+). Adapter 0.1.8+ no longer
+sends discarded top-level tools fields. Stock upstream ZeroClaw does not consume
+the envelope. Do not deploy this adapter against an unmodified stock runtime or
+an HAEE binary that only understands the old top-level tools fields: adapter and
+HAEE must be rolled out together.
 
-For a Paperclip-scoped ACP session, HAEE connects only the supplied HTTP MCP
-servers and exposes only tools advertised by those servers. Built-in tools and
+For a Paperclip-scoped ACP session, HAEE connects only the envelope-listed HTTP
+MCP servers and exposes only tools advertised by those servers. Built-in tools and
 saved agent MCP bundles are excluded from that session. A missing/empty
 brokered catalog therefore gives the model no tools; it does not fall back to
 generic HTTP, shell, or globally configured MCP. Standalone sessions keep their
 existing tool configuration.
 
-The session request carries the current Paperclip MCP bearer token in the HTTP
-transport header. The token is not included in the prompt or persisted session
-parameters. Verify this property and the server-side Tool Gateway policy/audit
-for each deployment. The adapter’s environment check validates ACP connectivity
-only; it does not validate Tool Gateway access or issue completion.
+The envelope carries the current Paperclip run bearer and MCP headers. Tokens are
+not included in the prompt or persisted session parameters. Verify this property
+and the server-side Tool Gateway policy/audit for each deployment. The adapter’s
+environment check validates ACP connectivity only; it does not validate Tool
+Gateway access or issue completion.
 
 ## Related
 

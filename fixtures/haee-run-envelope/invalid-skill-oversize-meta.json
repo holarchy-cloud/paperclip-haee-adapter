@@ -1,0 +1,36 @@
+{
+  "envelopeVersion": 1,
+  "identity": {
+    "runId": "run_skill_oversize",
+    "agentId": "agent_lab_elel",
+    "companyId": "company_lab_elel",
+    "haeeAgentAlias": "elel_lab"
+  },
+  "task": {
+    "summary": "skill sizeMax exceeds v1 hard cap (100 MiB)."
+  },
+  "auth": {
+    "paperclipApiBaseUrl": "http://paperclip.wombat-everest.ts.net:3100",
+    "runBearerToken": "RUN_TOKEN_PLACEHOLDER",
+    "runIdHeader": "X-Paperclip-Run-Id"
+  },
+  "skills": [
+    {
+      "key": "paperclipai/paperclip/issue-triage",
+      "runtimeName": "issue-triage",
+      "uri": "http://100.115.49.38:36181/skill-packs/huge.tar",
+      "integrity": {
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "sizeMax": 1073741825
+      },
+      "mediaType": "application/vnd.paperclip.skill.v1+tar",
+      "scope": "session"
+    }
+  ],
+  "tools": {
+    "paperclipToolsOnly": true,
+    "mcpServers": []
+  },
+  "policy": {},
+  "session": {}
+}

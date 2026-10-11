@@ -174,9 +174,16 @@ test('adapter forwards and revokes task MCP on new/resumed runs with rotated cre
       void (async () => {
         if (request.method === 'initialize') return reply({ protocolVersion: 1 });
         if (['session/new', 'session/resume'].includes(request.method)) {
-          this.mcp = request.params.mcpServers[0];
+          assert.equal(Object.hasOwn(request.params, 'paperclipToolsOnly'), false);
+          assert.equal(Object.hasOwn(request.params, 'mcpServers'), false);
+          const servers = request.params.envelope.tools.mcpServers;
+          assert.equal(request.params.envelope.tools.paperclipToolsOnly, true);
+          assert.equal(servers[0].name, 'paperclip_tasks');
+          this.mcp = {
+            ...servers[0],
+            headers: [{ name: 'Authorization', value: servers[0].headers.Authorization }],
+          };
           sessions.push(request);
-          assert.equal(request.params.paperclipToolsOnly, true);
           return reply({ sessionId: 'session-1' });
         }
         if (request.method === 'session/close') return reply({});
@@ -196,12 +203,16 @@ test('adapter forwards and revokes task MCP on new/resumed runs with rotated cre
   const first = await createServerAdapter().execute(ctx);
   assert.equal(first.exitCode, 0);
   assert.equal(state.issue.status, 'done');
-  await assert.rejects(fetch(sessions[0].params.mcpServers[0].url));
+  await assert.rejects(fetch(sessions[0].params.envelope.tools.mcpServers[0].url));
   state.issue = { ...state.issue, status: 'todo', executionRunId: null };
   const secondCtx = { ...ctx, runId: 'run-2', authToken: 'rotated-private-token', runtime: { sessionParams: first.sessionParams } };
   await createServerAdapter().execute(secondCtx);
   assert.equal(sessions[1].method, 'session/resume');
-  assert.notEqual(sessions[0].params.mcpServers[0].headers[0].value, sessions[1].params.mcpServers[0].headers[0].value);
+  assert.notEqual(
+    sessions[0].params.envelope.tools.mcpServers[0].headers.Authorization,
+    sessions[1].params.envelope.tools.mcpServers[0].headers.Authorization,
+  );
+  assert.equal(sessions[1].params.envelope.session.resumeSessionId, 'session-1');
   assert.equal(state.issue.status, 'done');
   assert.ok(state.requests.some(r => r.headers.authorization === 'Bearer rotated-private-token' && r.headers['x-paperclip-run-id'] === 'run-2'));
   assert.ok(!JSON.stringify(first.sessionParams).includes('private'));
@@ -215,6 +226,50 @@ test('cancellation immediately revokes task tools and shutdown closes the listen
   assert.equal((await fetch(bridge.mcpServer.url, { method: 'POST', headers: { Authorization: bridge.mcpServer.headers[0].value } })).status, 401);
   await bridge.stop();
   await assert.rejects(fetch(bridge.mcpServer.url));
+});
+
+test('execute failure after task MCP start still stops the listener', async t => {
+  const { ctx } = await fixture(t);
+  const previous = globalThis.WebSocket;
+  let taskMcpUrl;
+  class Socket extends EventTarget {
+    constructor() { super(); queueMicrotask(() => this.dispatchEvent(new Event('open'))); }
+    send(raw) {
+      const request = JSON.parse(raw);
+      const reply = result => this.dispatchEvent(new MessageEvent('message', {
+        data: JSON.stringify({ jsonrpc: '2.0', id: request.id, result }),
+      }));
+      const fail = message => this.dispatchEvent(new MessageEvent('message', {
+        data: JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code: -32000, message } }),
+      }));
+      void (async () => {
+        if (request.method === 'initialize') return reply({ protocolVersion: 1 });
+        if (request.method === 'session/new') {
+          assert.equal(Object.hasOwn(request.params, 'paperclipToolsOnly'), false);
+          assert.equal(Object.hasOwn(request.params, 'mcpServers'), false);
+          const servers = request.params.envelope.tools.mcpServers;
+          assert.equal(servers[0].name, 'paperclip_tasks');
+          taskMcpUrl = servers[0].url;
+          return reply({ sessionId: 'session-fail-path' });
+        }
+        if (request.method === 'session/prompt') {
+          return fail('simulated prompt failure after task MCP start');
+        }
+        if (request.method === 'session/close') return reply({});
+      })().catch(error => fail(error.message));
+    }
+    close() { this.dispatchEvent(new Event('close')); }
+  }
+  globalThis.WebSocket = Socket;
+  t.after(() => { globalThis.WebSocket = previous; });
+
+  await assert.rejects(
+    createServerAdapter().execute(ctx),
+    /simulated prompt failure after task MCP start/,
+  );
+  assert.ok(taskMcpUrl, 'task MCP must have been advertised on session/new before failure');
+  // finally must stop the listener even when session/prompt fails.
+  await assert.rejects(fetch(taskMcpUrl));
 });
 
 test('wake prompt excludes invocation credentials and transport metadata', () => {

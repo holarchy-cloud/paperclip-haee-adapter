@@ -1,0 +1,33 @@
+{
+  "envelopeVersion": 1,
+  "identity": {
+    "runId": "run_non_http_mcp",
+    "agentId": "agent_lab_elel",
+    "companyId": "company_lab_elel",
+    "haeeAgentAlias": "elel_lab"
+  },
+  "task": {
+    "summary": "MCP type must be http for Paperclip-scoped sessions."
+  },
+  "auth": {
+    "paperclipApiBaseUrl": "http://paperclip.wombat-everest.ts.net:3100",
+    "runBearerToken": "RUN_TOKEN_PLACEHOLDER",
+    "runIdHeader": "X-Paperclip-Run-Id"
+  },
+  "skills": [],
+  "tools": {
+    "paperclipToolsOnly": true,
+    "mcpServers": [
+      {
+        "type": "stdio",
+        "name": "local_shell_mcp",
+        "url": "n/a",
+        "headers": {
+          "Authorization": "Bearer RUN_TOKEN_PLACEHOLDER"
+        }
+      }
+    ]
+  },
+  "policy": {},
+  "session": {}
+}
